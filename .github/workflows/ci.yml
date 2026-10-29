@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: 1.18.x
+            otp: 27.x
+          - elixir: 1.20.x
+            otp: 29.x
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install OTP and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
+
+      - uses: actions/cache@v6
+        id: cache-deps
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{matrix.elixir}}-${{matrix.otp}}-${{ hashFiles('**/mix.lock') }}
+
+      - name: Get and compile deps
+        run: mix do deps.get + deps.compile
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+
+      - name: Run "mix format"
+        run: mix format --check-formatted
+
+      - name: Check unused dependencies
+        run: mix deps.unlock --check-unused
+
+      - name: Compile with --warnings-as-errors
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+      - name: Run credo
+        if: github.event_name == 'pull_request'
+        run: mix credo diff ${{ github.event.pull_request.base.sha }}
